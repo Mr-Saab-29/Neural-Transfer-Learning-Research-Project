@@ -1,0 +1,27 @@
+.venv/
+__pycache__/
+.ipynb_checkpoints/
+.DS_Store
+
+# Neuroimaging datasets
+data/raw/
+data/processed/
+
+# Model artifacts
+*.pt
+*.pth
+*.ckpt
+
+# Local participant metadata, QC decisions, and experiment outputs
+data/
+results/
+
+# Exploratory notebooks may contain embedded scans and participant tables
+notebooks/
+
+# Local credentials and environments
+.env
+.env.*
+!.env.example
+.pytest_cache/
+*.pyc

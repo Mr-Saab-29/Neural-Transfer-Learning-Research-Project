@@ -1,0 +1,6 @@
+numpy
+scipy
+nibabel
+torch
+huggingface_hub
+matplotlib
