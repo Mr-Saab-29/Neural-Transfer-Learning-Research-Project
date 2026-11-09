@@ -25,3 +25,7 @@ notebooks/
 !.env.example
 .pytest_cache/
 *.pyc
+
+# Keep README as the only tracked Markdown document
+*.md
+!README.md
