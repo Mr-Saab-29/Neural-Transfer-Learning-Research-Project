@@ -13,8 +13,8 @@ data/processed/
 *.ckpt
 
 # Local participant metadata, QC decisions, and experiment outputs
-data/
-results/
+/data/
+/results/
 
 # Exploratory notebooks may contain embedded scans and participant tables
 notebooks/
