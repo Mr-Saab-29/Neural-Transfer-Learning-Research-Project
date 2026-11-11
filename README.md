@@ -171,15 +171,178 @@ If a process is forcibly terminated, inspect the run state before removing a sta
 `data/manifests`. During long preparation runs, leave `review.csv` closed to avoid
 conflicting edits. Checkpoint and script updates can invalidate the frozen plan.
 
+## Pilot figures and summary
+
+Generate the research summary from saved predictions and training histories:
+
+```bash
+python scripts/summarize_pilot_results.py --bootstrap 10000 --seed 42
+```
+
+No training, MRI processing, or model evaluation is performed. The script checks
+snapshot hashes and reproduces the reported test MAEs from saved predictions.
+It follows the comparison folder recorded in the frozen plan. Outputs go to
+`results/pilot_summary_v1/`:
+
+- Training curves, validation/test MAE comparisons, test prediction scatterplots,
+  and paired MAE difference intervals, each as PNG and PDF.
+- `paired_bootstrap.csv` and `summary.json` with exploratory 95% percentile
+  confidence intervals, reproducible bootstrap settings, and input hashes.
+- `pilot_summary.md` with methods, results, exclusions, and limitations.
+
+Bootstrap resampling keeps all predictions for each subject paired and averages
+absolute errors across the fixed seeds; it does not evaluate a prediction ensemble.
+Intervals assume independent subjects and exclude training/retraining uncertainty.
+They are exploratory and unadjusted for multiple comparisons. Inspect generated
+figures and the summary before sharing them. Existing output folders are preserved;
+use `--output results/pilot_summary_v2` for a separate rerun. Generated Markdown
+remains local under the ignored `results/` folder.
+
+## Follow-up development protocol
+
+Freeze a separate 90-subject development cohort drawn exclusively from the original
+AOMIC training allocation. Subject-ID hashing determines selection without using
+target values. Three folds each hold out 30 subjects and provide nested training
+subsets of 15, 30, and 60. All methods and seeds use the same subjects.
+
+```bash
+python -m unittest discover -s tests -p test_followup_protocol.py -v
+python scripts/build_followup_protocol.py
+```
+
+Outputs are under `data/manifests/aomic_followup_v1/`: `protocol.json`,
+`cohort.csv`, three evaluation manifests, and nine training manifests. Identical
+reruns preserve outputs; changed inputs or outputs are rejected. These are selection
+manifests, not inputs for the existing training loader: all subjects still require
+verified image QC and compatible artifacts. No scans are downloaded or processed.
+An unapprovable scan requires a documented protocol revision before training;
+subjects must not be silently dropped or replaced.
+
+The primary comparison is fine-tuned pretrained versus randomly initialized CNN
+at 60 labels. The 15/30-label and training-mean comparisons are secondary. Seeds
+are 42, 43, and 44. Pool the 90 out-of-fold predictions per method/size/seed before
+calculating MAE, then average across seeds. Fit normalization and baselines only on
+the relevant training subset. Outer evaluation folds must not select checkpoints,
+epochs, or hyperparameters. AOMIC remains excluded from pretraining.
+
+This freezes selection and evaluation design only. The commands below freeze the
+whole-brain training configuration and QC artifact hashes separately before fitting.
+Because pilot results have already
+informed development, these folds are development cross-validation, not a new
+untouched confirmation cohort. The original validation/test allocations remain out
+of this experiment.
+
+## Follow-up cohort preparation and whole-brain training
+
+The implementation is provided for local execution. It has not yet produced new
+experiment results. First run the synthetic checks:
+
+```bash
+python -m unittest discover -s tests -p test_wholebrain_setup.py -v
+```
+
+With Docker running, prepare scans in resumable batches:
+
+```bash
+python scripts/prepare_followup_cohort.py prepare --limit 10
+python scripts/prepare_followup_cohort.py status
+# Only when retrying failed scans:
+python scripts/prepare_followup_cohort.py prepare --limit 10 --retry-failed
+```
+
+Repeat preparation until all 90 subjects have been attempted. Downloads use the
+pinned source revision; compatible processed artifacts are reused after checksum
+verification. The existing processing pipeline is unchanged. The checklist is saved
+after every scan, and failure details remain in the checklist and per-scan logs.
+Outputs are under `results/aomic_followup_v1/`; MRI tensors stay under
+`data/processed/brain_v1/`.
+
+Inspect each subject's PNG and edit `results/aomic_followup_v1/review.csv` while
+preparation is stopped. Set `decision` to `accept` only after visual review; provide
+notes for flagged scans. Automated passes are not automatically accepted. The
+frozen design requires all 90 subjects: an exclusion blocks training and requires
+an explicit revised protocol, rather than silently changing fold sizes.
+
+Once all 90 subjects are accepted:
+
+```bash
+python scripts/prepare_followup_cohort.py freeze
+python scripts/train_wholebrain.py check
+python scripts/train_wholebrain.py overfit
+```
+
+Freeze verifies all image artifacts and writes `ready/config.json`, an approved
+cohort manifest, and an SSL training manifest. The loader check validates all tensors
+and a gradient update. The four-subject overfit diagnostic uses only fold 0 training
+subjects; it must reach MAE below 1 point before further training is allowed.
+Its report is `results/aomic_followup_v1/overfit/report.json`. A failed diagnostic
+requires investigation, not bypassing the gate.
+
+The new CNN averages the full approved 128³ input to 64³, preserving its field of
+view without central cropping. This reduces spatial resolution from 2 mm to an
+effective 4 mm. Three stride-2 convolution blocks have 8/16/32 channels, GroupNorm,
+and GELU; a 2³ spatial pooling grid feeds a linear regression head. Both comparison
+arms fine-tune the entire network. CPU execution uses two threads, batch size one,
+Adam at 0.001, no augmentation, and a fixed 50-epoch schedule. There is no outer-fold
+early stopping or best-checkpoint selection. Target scaling and the mean baseline
+are fitted separately on each training subset.
+
+The old central-patch checkpoint is incompatible with this architecture. Train a
+new masked-reconstruction encoder on the previously approved IXI/NKI **training**
+subjects only (22 in the current pilot), using a fixed 20-epoch schedule and seed 42:
+
+```bash
+python scripts/train_wholebrain.py pretrain --max-epochs 2
+```
+
+Repeat that command to finish, or omit `--max-epochs` to finish the remaining epochs
+in one invocation. Pretraining masks random 8³ blocks and computes reconstruction
+MSE only on masked nonzero voxels. It never uses AOMIC scans. This remains a small
+pretraining cohort, which limits broader transfer-learning conclusions. The completed
+checkpoint and its hash are saved under `pretraining/` and bound to supervised runs.
+
+After pretraining completes, start a short paired training invocation:
+
+```bash
+python scripts/train_wholebrain.py train --fold 0 --size 15 --seed 42 --max-epochs 2
+```
+
+This trains both random and pretrained arms for up to two additional epochs each.
+Repeat to resume, or run the entire fixed design:
+
+```bash
+python scripts/train_wholebrain.py train --all
+python scripts/train_wholebrain.py summarize
+```
+
+The full design contains **54 supervised runs**: three folds × three sample sizes
+× three seeds × two CNN arms. Budget time using the first run's measured speed.
+`--all --max-epochs 2` advances each unfinished run by at most two epochs. Evaluation
+occurs only when that run reaches epoch 50. Completed runs are verified and skipped.
+Interrupted runs resume from the last atomically saved epoch, including optimizer
+state and deterministic epoch-specific sample ordering. No MRI processing occurs
+during training, so Docker can be closed for this stage.
+
+Each run stores its history, curve, checkpoint, training manifest, predictions, and
+report under `results/aomic_followup_v1/runs/`. Summarization requires all 54 runs
+and writes `comparison.json` and paired `out_of_fold_predictions.csv`; every subject
+must have exactly one out-of-fold prediction per method/size/seed. Existing pilot
+results are preserved. Changing frozen code, QC, manifests, or checkpoints is
+rejected; keep versioned experiment outputs when revising the study.
+
 ## Verification
 
 ```bash
 python -m unittest discover -s tests -p test_final_aomic_test.py -v
+python -m unittest discover -s tests -p test_summarize_pilot_results.py -v
 ```
 
 The final-workflow tests use temporary files and mocks for failure recovery, batch
 limits, locks and QC gating. They have been written for user execution. Some earlier
 tests require the local cohort manifest.
+Summary tests cover paired bootstrap reproducibility, known constant differences,
+and rejection of duplicate subjects, non-finite predictions, and inconsistent MAEs.
+These tests are provided for user execution; they have not been run by the assistant.
 
 ## To do
 
@@ -189,7 +352,14 @@ tests require the local cohort manifest.
 - [x] Prepare all 124 test scans and finish visual QC (123 accepted, one excluded).
 - [x] Run the final evaluator and review its report.
 - [x] Summarize the final results, exclusions and limitations in this README.
-- [ ] Prepare research figures and a concise pilot write-up for the PhD application.
-- [ ] Define the follow-up evaluation protocol before further model development.
+- [x] Prepare research figures and a concise pilot write-up for the PhD application (user confirmed).
+- [x] Implement saved-results figures, paired bootstrap intervals, and summary generation.
+- [x] Run summary generation and inspect figures and the pilot write-up (user confirmed).
+- [x] Implement follow-up selection/evaluation protocol and nested manifests.
+- [ ] Run follow-up synthetic tests and freeze the selection manifests.
+- [ ] Complete cohort QC and freeze the follow-up training configuration.
+- [x] Implement resumable cohort preparation, whole-brain CNN/SSL training, diagnostics, and out-of-fold summaries.
+- [ ] Run whole-brain synthetic tests and loader/overfit checks.
+- [ ] Complete new-architecture pretraining and the fixed paired CNN comparison.
 - [ ] Study larger labeled training subsets and broader brain coverage under that protocol.
 - [ ] Compare fine-tuning and a transformer architecture if time and compute permit.
