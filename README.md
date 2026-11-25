@@ -4,6 +4,37 @@ Research prototype for data-efficient prediction of AOMIC `IST_fluid` scores fro
 3D brain MRI. IXI and NKI supply the pretraining pilot. AOMIC supplies the labeled
 training, validation, and held-out test subjects.
 
+## Study status and consolidated findings
+
+The scoped experimental series is complete (15 November 2026). Under the tested
+small-data settings, masked-reconstruction pretraining did not improve average
+cognitive-score prediction. Early checkpoint selection modestly helped relative
+to matched fixed-epoch controls. Increasing CNN and ViT pretraining to 120 subjects did
+not reverse the lack of observed transfer benefit.
+
+The table below uses the **same 90-subject development cohort**, three outer folds,
+48 fitting / 12 inner-validation / 30 outer-evaluation subjects per fold, and
+inner-selected checkpoints. Values average MAE over three fine-tuning seeds.
+
+| Method | Pretraining subjects | Mean MAE (IST_fluid points) |
+|---|---:|---:|
+| Random CNN | 0 | **20.297** |
+| Pretrained CNN | 22 | 20.900 |
+| Training-mean baseline | — | 20.985 |
+| Pretrained CNN | 60 | 21.217 |
+| Pretrained CNN | 120 | 21.197 |
+| Random ViT | 0 | 21.493 |
+| Pretrained ViT | 22 | 21.685 |
+| Pretrained ViT | 60 | 21.637 |
+| Pretrained ViT | 120 | 21.823 |
+
+These are descriptive development results, not statistically confirmed superiority.
+The original 123-subject pilot test is a different evaluation cohort and is reported
+separately below. The 90 development subjects came from the original training
+allocation, not from that test cohort. More pretraining subjects also meant more
+optimizer updates, so the scale experiment does not isolate data size from compute.
+No clinical utility, equivalence, or general failure of transfer learning is claimed.
+
 ## Setup
 
 Use Python 3.10 or newer.
@@ -330,6 +361,364 @@ must have exactly one out-of-fold prediction per method/size/seed. Existing pilo
 results are preserved. Changing frozen code, QC, manifests, or checkpoints is
 rejected; keep versioned experiment outputs when revising the study.
 
+## Completed whole-brain follow-up results
+
+The user completed all 54 supervised runs and out-of-fold aggregation. Each seed
+is evaluated on the same 90 subjects, with one held-out prediction per subject.
+The following are mean MAEs across three seeds, in IST_fluid points:
+
+| Training labels per fold | Training mean | Random CNN | Pretrained CNN | Pretrained minus random |
+|---|---:|---:|---:|---:|
+| 15 | 20.899 | 20.532 | 21.061 | +0.529 |
+| 30 | 20.856 | 20.168 | 20.440 | +0.272 |
+| 60 | 20.912 | 20.180 | 20.707 | +0.526 |
+
+For the prespecified primary comparison at 60 labels, pretraining increased mean
+MAE by 0.526 points relative to random initialization. Random initialization had
+lower mean MAE at every sample size; pretraining won only two of nine size/seed
+comparisons. Both learning curves lack consistent improvement as labels increase.
+This study shows no observed label-efficiency benefit from the tested pretraining
+setup, not a general failure of transfer learning or evidence of equivalence.
+
+Inspection of all 18 saved 60-label training histories found final training MAEs
+between 1.101 and 3.936 points, compared with roughly 20 points out of fold. This
+indicates strong training-target fitting and a substantial generalization gap.
+Prediction-spread diagnostics are needed before claiming near-constant predictions.
+The SSL cohort contained only 22 subjects and supplied one pretrained checkpoint.
+
+These are development cross-validation results after pilot test exposure. The
+earlier pilot used a different evaluation cohort; its MAEs cannot establish a
+before/after improvement from whole-brain coverage. Do not select a winning seed
+or architecture from these results and present it as independently confirmed.
+
+Generate figures, paired error diagnostics, and the detailed research summary:
+
+```bash
+python -m unittest discover -s tests -p test_followup_analysis.py -v
+python scripts/analyze_followup_results.py --bootstrap 10000 --seed 42
+```
+
+The new analysis script reads saved outputs only and leaves frozen training code
+unchanged. It checks configuration/artifact hashes and reconciles combined
+predictions with all 54 run outputs. It writes to `results/aomic_followup_analysis_v1/`:
+
+- `learning_curves`, `training_generalization`, `prediction_spread`, and
+  `paired_fold_differences` figures, each in PNG and PDF.
+- `run_diagnostics.csv`: training/evaluation gaps, within-fold prediction/target
+  standard deviations, SD ratios, correlations, and bias.
+- `paired_fold_differences.csv` and `conditional_sensitivity.csv`.
+- `analysis.json` with input hashes and results, plus `research_summary.md`.
+
+The sensitivity analysis resamples subjects within each evaluation fold, keeping
+all seed/method/size predictions paired. It reports descriptive 95% percentile
+ranges conditional on fixed predictions. **These are not calibrated cross-validation
+confidence intervals:** overlapping training sets induce dependence that this
+resampling cannot capture. Three folds do not support a reliable fold-cluster
+bootstrap. No naive t-tests, p-values, or significance/equivalence claims are made.
+Seed/fold contrasts are shown explicitly; seeds and folds are not independent
+replicates. Robust inference would require a separately designed repeated-refitting
+study or independent evaluation data.
+
+Existing analysis folders are preserved; use `--output` for a new version. The
+analysis and its synthetic tests are provided for user execution and have not been
+run by the assistant. Inspect the generated figures and report before publication.
+
+## Inner-validation checkpoint selection experiment
+
+This separate development experiment tests checkpoint selection at the 60-label
+budget. Each existing outer fold keeps its 30 evaluation subjects. Subject-ID
+hashing partitions its 60 training subjects into **48 fitting and 12 inner-validation
+subjects**, identically across methods and seeds. All 60 labels count toward the
+budget. Target normalization and the mean baseline use only the 48 fitting subjects.
+Existing approved scans and the whole-brain pretrained encoder are reused; no new
+MRI processing or pretraining is required.
+
+```bash
+python -m unittest discover -s tests -p test_inner_validation.py -v
+python scripts/train_inner_validation.py freeze
+python scripts/train_inner_validation.py train --fold 0 --seed 42 --max-epochs 5
+```
+
+The new frozen plan and manifests live under `results/aomic_inner_validation_v1/frozen/`.
+The policy monitors inner-validation MAE from epoch 1, requires improvement greater
+than 0.1 IST_fluid points, and uses patience 10. Ties retain the earlier checkpoint.
+When patience expires, the selected checkpoint is frozen permanently; later epochs
+cannot alter it. If patience does not expire, the best qualifying checkpoint through
+epoch 50 is selected. Inner-validation MAE is not queried after stopping.
+
+The same trajectory continues to epoch 50 solely to produce the matched fixed-epoch
+control. Thus both policies share the 48 fitting subjects, initialization, optimizer,
+and sample order. This tests checkpoint selection without confounding it with
+different fitting-set sizes. It does not save training compute in this controlled
+comparison. Neither policy refits on all 60 subjects. Outer images/labels are used
+only after both policies are fixed; no outer-fold checkpoint selection occurs.
+
+```bash
+python scripts/train_inner_validation.py train --all
+python scripts/train_inner_validation.py summarize
+```
+
+There are 18 trajectories (three folds × three seeds × two initializations), producing
+36 checkpoint evaluations. Repeat commands to resume from the last completed epoch;
+`--max-epochs` limits additional work per trajectory without changing the plan.
+The resume checkpoint includes optimizer state and the early-selection state.
+Completed runs are checked and skipped. Original experiment files are not modified.
+
+Each run stores `early.pt`, `fixed50.pt`, training/inner-validation history, paired
+outer predictions, and a report with selected and stopping epochs. The summary writes
+`comparison.json` and `out_of_fold_predictions.csv` under
+`results/aomic_inner_validation_v1/`. Negative `early_minus_fixed50` favors selection.
+Compare against this matched 48-subject control, not directly against the previous
+60-fitting-subject experiment. Inner-validation results from 12 subjects may be noisy;
+these are follow-up development results, not independently confirmed improvements.
+The new tests and training script are provided for user execution and have not been
+run by the assistant.
+
+## Tiny 3D transformer comparison
+
+This new development experiment compares a randomly initialized 3D ViT against the
+saved early-selected random CNN. It reuses the exact 48 fitting / 12 inner-validation
+/ 30 outer-evaluation subject manifests, seeds 42/43/44, training-only normalization,
+Adam learning rate 0.001, batch size one, no augmentation, and the same 0.1-point
+improvement / patience-10 rule with a maximum of 50 epochs. No new preprocessing,
+CNN retraining, or transformer pretraining is performed.
+
+The model covers the full 64³ volume with 64 non-overlapping 16³ patches, learned
+position embeddings, width 48, two attention blocks, three heads, MLP ratio two,
+LayerNorm, mean token pooling, and a linear regression head. Dropout is zero for
+deterministic epoch-boundary resumption. Although small, it has more parameters than
+the CNN; counts are frozen and reported. This is not a parameter-matched or separately
+optimized architecture comparison, and coarse patching is an explicit limitation.
+
+```bash
+python -m unittest discover -s tests -p test_tiny_vit.py -v
+python scripts/train_tiny_vit.py freeze
+python scripts/train_tiny_vit.py check
+python scripts/train_tiny_vit.py overfit
+```
+
+The synthetic tests check patch coverage, gradients, and optimizer/checkpoint
+round trips. The real-data check validates split separation and a training gradient.
+The four-subject diagnostic uses only fold 0 fitting subjects and must reach MAE
+below 1 point before training. Inspect `results/aomic_tiny_vit_v1/overfit_report.json`.
+This memorization check is not a generalization result.
+
+```bash
+python scripts/train_tiny_vit.py train --fold 0 --seed 42 --max-epochs 5
+python scripts/train_tiny_vit.py train --all
+python scripts/train_tiny_vit.py summarize
+```
+
+There are nine runs. Commands resume from the last saved epoch, including optimizer
+and checkpoint-selection state. Unlike the matched CNN stopping experiment, these
+runs halt when patience expires; no fixed-epoch ViT control is trained. Outer scoring
+occurs only after selection ends. Completed results are checked and skipped.
+
+The frozen plan, manifests, and outputs live under `results/aomic_tiny_vit_v1/`.
+Each run saves training/inner-validation history, the selected checkpoint, outer
+predictions, selected epoch, and accumulated training/selection seconds. Summary
+requires all nine runs and writes `comparison.json` and paired
+`out_of_fold_predictions.csv`. Negative `vit_minus_cnn` favors the transformer.
+Recorded time excludes loading, outer scoring and checkpoint writes. CNN runtime
+was not recorded, so the comparison cannot establish a wall-time speedup.
+
+The completed CNN experiment and its frozen code remain unchanged. Transformer
+configuration changes require a separate version; the script rejects changed
+dependencies or reference outputs. This is development evidence after viewing CNN
+results, not untouched confirmation, and no significance claim is automatic.
+Scripts and tests are provided for user execution; the assistant has not run them.
+
+## Completed random-transformer comparison
+
+The user completed nine random-ViT runs. Mean out-of-fold MAE was **21.493** for
+the ViT, **20.297** for the early-selected random CNN, and **20.985** for the mean
+baseline. The ViT was worse than both comparators in all three seed averages;
+its mean disadvantage to the CNN was 1.196 points. It had 237,793 parameters versus
+17,921 for the CNN. The four-subject diagnostic passed at 0.022 MAE. Selected
+epochs ranged from 1 to 13. This particular transformer/training recipe offered
+no observed advantage; it does not establish that transformers generally fail.
+
+## Masked-reconstruction ViT pretraining comparison
+
+The new experiment reuses the exact transformer architecture, approved 22 IXI/NKI
+SSL training subjects, and original 48/12/30 downstream splits. It preserves all
+previous frozen files. No new MRI preprocessing is required. A linear decoder maps
+each transformer token to its 16³ MRI patch. Pretraining uses the same 20% random
+8³ block masking and masked-nonzero-voxel MSE objective as the CNN experiment:
+20 fixed epochs, Adam 0.001, batch size one, seed 42. The decoder differs by
+architecture, so these are matched objectives/schedules, not identical SSL models.
+
+```bash
+python -m unittest discover -s tests -p test_vit_reconstruction.py -v
+python scripts/train_pretrained_vit.py freeze
+python scripts/train_pretrained_vit.py check
+python scripts/train_pretrained_vit.py pretrain --max-epochs 5
+```
+
+Repeat `pretrain` to resume, or omit `--max-epochs` to finish the remaining epochs.
+The `check` stage validates all SSL tensors, a masked-loss gradient update, and
+backbone transfer without changing the regression head. The existing passing ViT
+overfit diagnostic is required at freeze. Pretraining uses no AOMIC scans or labels
+and selects its final epoch only. Patch embedding, positional embeddings, attention
+blocks, and final normalization are transferred; the decoder is discarded. The
+regression head retains exactly the same seeded initialization as the random arm.
+
+After pretraining is complete:
+
+```bash
+python scripts/train_pretrained_vit.py train --fold 0 --seed 42 --max-epochs 5
+python scripts/train_pretrained_vit.py train --all
+python scripts/train_pretrained_vit.py summarize
+```
+
+Nine fine-tuning runs use the unchanged inner-validation rule (patience 10,
+minimum improvement 0.1 points, maximum 50 epochs), Adam 0.001, and fitting-only
+target normalization. All backbone layers and the head train. Epoch checkpoints
+include optimizer and selection state; completed runs are verified and skipped.
+Outer subjects are scored only after checkpoint selection is complete. The new
+pretraining checkpoint hash is bound to every fine-tuning run.
+
+Outputs are under `results/aomic_pretrained_vit_v1/`: `frozen/plan.json`,
+`pretraining/backbone.pt`, SSL history, per-run fine-tuning histories/checkpoints,
+and reports. Summarization verifies paired subject identities, targets and baselines
+against the saved random-ViT predictions, then writes `comparison.json` and
+`out_of_fold_predictions.csv`. Negative `pretrained_minus_random` favors pretraining.
+This remains development evidence with one small pretraining cohort and one SSL
+seed; no statistical significance or independent confirmation is assumed.
+The new implementation and synthetic tests have not been executed by the assistant.
+
+## Pretraining-scale cohort extension: 22 → 60 → 120
+
+This staged extension uses only IXI/NKI; the 90-subject AOMIC downstream cohort and
+its splits stay unchanged. The 123 accepted original AOMIC test scans are a separate
+cohort and are not added to pretraining or these development folds.
+
+```bash
+python -m unittest discover -s tests -p test_pretraining_scale.py -v
+python scripts/prepare_pretraining_scale.py select
+```
+
+Selection freezes all three nested cohorts under `results/pretraining_scale_v1/frozen/`.
+The original 22 scans (11/source) are preserved exactly. The 60-subject cohort has
+30/source (38 additions); the 120-subject cohort has 60/source (60 further additions).
+New subjects are selected by deterministic subject-ID hashing, with one canonical
+scan per subject. Original pilot IXI/NKI validation/test subjects remain reserved.
+All candidate manifests and selections are hashed. No data is downloaded by `select`.
+
+With Docker running, prepare the first expansion:
+
+```bash
+python scripts/prepare_pretraining_scale.py prepare --size 60 --limit 10
+python scripts/prepare_pretraining_scale.py status --size 60
+# Explicit retry after resolving a failed scan:
+python scripts/prepare_pretraining_scale.py prepare --size 60 --limit 10 --retry-failed
+```
+
+Repeat until preparation is complete. Existing compatible tensors are reused.
+Earlier accepted visual decisions are imported only when their metadata and all
+artifact hashes match the selected scan and preprocessing version. Automated review
+flags and prior notes remain recorded. Stale approvals are not carried forward.
+New decisions remain pending; inspect the subject PNGs and edit
+`results/pretraining_scale_v1/size60/review.csv` while preparation is stopped.
+
+Once every selected subject has been visually accepted:
+
+```bash
+python scripts/prepare_pretraining_scale.py approve --size 60
+```
+
+`approve` validates existing decisions; it does not accept pending scans for you.
+It requires all 60 subjects, verifies tensors, and freezes `size60/ready/ssl_training.csv`
+with a review snapshot and checksums. No silent replacement or exclusion is allowed;
+an unapprovable scan needs an explicit selection revision before training.
+
+Then prepare the second expansion, reusing the verified 60-subject approvals:
+
+```bash
+python scripts/prepare_pretraining_scale.py prepare --size 120 --limit 10
+python scripts/prepare_pretraining_scale.py status --size 120
+# After reviewing the additional subjects in size120/review.csv:
+python scripts/prepare_pretraining_scale.py approve --size 120
+```
+
+Proceed to 120 based on available preparation/review capacity, not favorable
+downstream results. The approved 60-subject stage is required before preparing 120.
+The raw and processed images remain in their existing `data/` locations; prior
+experiments are preserved. Each attempted scan saves progress, and failures remain
+in the stage checklist/logs.
+
+This implementation selects and prepares cohorts only. Expanded-cohort CNN training
+must be frozen separately; do not replace manifests in completed experiment folders.
+The intended 20-epoch comparison entails 440, 1,200, and 2,400 batch-one SSL updates
+at 22, 60, and 120 subjects respectively, so it changes both data size and compute.
+A matched-update control would be needed to isolate data scale from update budget.
+The script and synthetic tests have not been executed by the assistant.
+
+## CNN pretraining-scale training experiment
+
+Both expanded cohorts have been prepared, visually accepted by the user, and frozen:
+60 subjects (30 IXI/30 NKI) and 120 subjects (60 IXI/60 NKI). The training implementation
+reuses the original whole-brain CNN and reconstruction decoder. It leaves all prior
+experiments unchanged and uses `results/cnn_pretraining_scale_v1/` for new outputs.
+
+```bash
+python -m unittest discover -s tests -p test_cnn_pretraining_scale.py -v
+python scripts/train_pretraining_scale.py freeze
+```
+
+Freeze binds both approved cohorts, exact artifacts for retained subjects, the
+unchanged 48/12/30 AOMIC manifests, the existing random/22-subject CNN reference
+results, and the implementation hashes. It rejects unapproved scans, duplicate
+subjects, nonnested cohorts, and non-IXI/NKI pretraining sources.
+
+Run the 60-subject stage:
+
+```bash
+python scripts/train_pretraining_scale.py check --size 60
+python scripts/train_pretraining_scale.py pretrain --size 60
+python scripts/train_pretraining_scale.py train --size 60 --all
+```
+
+Then run the 120-subject stage:
+
+```bash
+python scripts/train_pretraining_scale.py check --size 120
+python scripts/train_pretraining_scale.py pretrain --size 120
+python scripts/train_pretraining_scale.py train --size 120 --all
+python scripts/train_pretraining_scale.py summarize
+```
+
+`check` verifies every approved input tensor, a reconstruction gradient update, and
+encoder transfer with an unchanged regression head. The previously passed CNN
+overfit diagnostic is reused. Each size gets an independently initialized SSL run
+with seed 42, Adam 0.001, batch size one, 20 fixed epochs, and the original 20% random
+8³-block masking objective. The 120-subject run does not continue the 60-subject
+checkpoint. Pretraining selects the final epoch without downstream-score selection.
+
+Each checkpoint is fine-tuned in nine runs (three folds × three seeds), using the
+same fitting-only normalization, seeded head initialization, sample order, Adam
+settings, and inner-validation selection as the existing CNN comparison. Patience
+is 10, minimum improvement 0.1 MAE points, and maximum duration 50 epochs. Only the
+48 fitting subjects update weights; 12 inner subjects select checkpoints; 30 outer
+subjects are evaluated after selection. This produces 18 new fine-tuning runs.
+
+Both `pretrain` and `train` accept `--max-epochs 5` for resumable work. For a single
+fine-tuning run, use `train --size 60 --fold 0 --seed 42 --max-epochs 5`.
+Epoch checkpoints preserve optimizer state; fine-tuning also preserves selection
+state. Completed runs are checked and skipped. No new MRI processing is performed.
+
+The summary requires both sizes to finish. It writes `comparison.json` and paired
+`out_of_fold_predictions.csv` at `results/cnn_pretraining_scale_v1/`, with results
+for random initialization and pretraining on 22, 60, and 120 subjects, plus the
+training-mean baseline. Negative `scale120_minus22` favors the larger cohort. The
+primary contrast is 120 versus 22; 60 is the intermediate scale. Existing reference
+runs are reused, not retrained.
+
+This remains a developmental fixed-epoch scaling comparison: SSL updates rise from
+440 to 1,200 to 2,400, so any gain cannot be attributed to unique-subject count alone.
+There is one SSL seed per size. The new script and synthetic tests have not been
+executed by the assistant; the completed user-run training results are summarized above.
+
 ## Verification
 
 ```bash
@@ -344,22 +733,115 @@ Summary tests cover paired bootstrap reproducibility, known constant differences
 and rejection of duplicate subjects, non-finite predictions, and inconsistent MAEs.
 These tests are provided for user execution; they have not been run by the assistant.
 
-## To do
+## Consolidation and remaining work
 
-- [x] Implement final test preparation and evaluator.
-- [ ] Run the final-workflow tests and address any failures.
-- [x] Freeze the evaluation plan using the chosen comparison folder.
-- [x] Prepare all 124 test scans and finish visual QC (123 accepted, one excluded).
-- [x] Run the final evaluator and review its report.
-- [x] Summarize the final results, exclusions and limitations in this README.
-- [x] Prepare research figures and a concise pilot write-up for the PhD application (user confirmed).
-- [x] Implement saved-results figures, paired bootstrap intervals, and summary generation.
-- [x] Run summary generation and inspect figures and the pilot write-up (user confirmed).
-- [x] Implement follow-up selection/evaluation protocol and nested manifests.
-- [ ] Run follow-up synthetic tests and freeze the selection manifests.
-- [ ] Complete cohort QC and freeze the follow-up training configuration.
-- [x] Implement resumable cohort preparation, whole-brain CNN/SSL training, diagnostics, and out-of-fold summaries.
-- [ ] Run whole-brain synthetic tests and loader/overfit checks.
-- [ ] Complete new-architecture pretraining and the fixed paired CNN comparison.
-- [ ] Study larger labeled training subsets and broader brain coverage under that protocol.
-- [ ] Compare fine-tuning and a transformer architecture if time and compute permit.
+Experimental training is complete for the scoped study. The empirical report is
+`results/research_consolidation_v1/research_report.md`. It separates evaluation
+cohorts, describes the design and limitations, and consolidates all experiment arms.
+Only this README is tracked as Markdown; the full report remains in ignored local
+results, alongside participant-level outputs and checkpoints.
+
+Generate final tables, figures, and a saved-output consistency audit:
+
+```bash
+python -m unittest discover -s tests -p test_consolidate_research.py -v
+python scripts/consolidate_research.py
+```
+
+Outputs are under `results/research_consolidation_v1/package/`: `results_table.csv`,
+four figure sets in PNG/PDF, a copy of the empirical report, and `audit.json` with
+source hashes. The script reconciles seed means and reused reference results,
+checks development/test identities against original allocations, and recomputes
+scale/ViT MAEs from saved paired predictions. It performs no model fitting or scoring.
+It preserves existing output folders; use `--output` for a new version.
+This is a saved-output consistency audit, not a full reproduction of training.
+The consolidation script and synthetic tests have not been run by the assistant.
+
+- [x] Complete the original held-out pilot and QC documentation.
+- [x] Complete whole-volume labeled-data, checkpoint-selection, architecture, and pretraining-scale experiments.
+- [x] Draft a unified empirical report and implement final tables/figures/audit generation.
+- [x] Generate the consolidation package and inspect its audit and figures.
+- [x] Add a literature-backed introduction, discussion and seven primary references.
+- [ ] Confirm relevant test results and review the revised report before sharing.
+- [ ] Prepare the application summary/presentation.
+- [ ] Review reproducibility instructions and commit the intended code/README changes.
+
+The ViT scaling extension is complete; no further model experiments are scheduled. Stronger
+confirmation would require a separate prespecified evaluation design and independent
+evidence, rather than continued model selection on the same development cohort.
+
+The revised local report includes a focused literature discussion and distinguishes
+our reconstruction implementation from the original MAE. The existing audited
+package is preserved. Package the revised text with fresh source hashes using:
+
+```bash
+python scripts/consolidate_research.py --output results/research_consolidation_v1/package_v3
+```
+
+## ViT pretraining expansion: 60 and 120 subjects
+
+The extension is complete. Mean ViT MAEs at 22/60/120 SSL subjects were
+21.685/21.637/21.823, versus 21.493 for random ViT and 20.985 for the
+training mean. The slight 60-versus-22 improvement occurred in only one seed;
+there was no consistent average scaling benefit. It reused the
+approved nested IXI/NKI cohorts and existing tensors. No new downloads,
+preprocessing, review decisions or test-cohort evaluation are needed.
+Existing random and 22-subject ViT results remain frozen. The new script preserves
+the same architecture, masking, Adam settings, 20 SSL epochs (seed 42), and
+48-fitting/12-inner/30-outer partitions. Both sizes use three folds and fine-tuning
+seeds 42/43/44: two SSL runs and 18 downstream runs. Inner checkpoint selection
+uses the existing maximum 50 epochs, patience 10 and 0.1-point improvement rule.
+
+Run in the project environment, sequentially:
+
+```bash
+python -m unittest discover -s tests -p test_vit_pretraining_scale.py -v
+python -m unittest discover -s tests -p test_vit_reconstruction.py -v
+python scripts/train_vit_pretraining_scale.py freeze
+python scripts/train_vit_pretraining_scale.py check --size 60
+python scripts/train_vit_pretraining_scale.py pretrain --size 60
+python scripts/train_vit_pretraining_scale.py train --size 60 --all
+python scripts/train_vit_pretraining_scale.py check --size 120
+python scripts/train_vit_pretraining_scale.py pretrain --size 120
+python scripts/train_vit_pretraining_scale.py train --size 120 --all
+python scripts/train_vit_pretraining_scale.py summarize
+```
+
+Stop if a command fails. Freezing verifies the approved source manifests, nesting,
+original artifacts and reference results, then saves separate plans for both sizes.
+The checks verify tensors, a reconstruction gradient update and backbone transfer.
+For shorter sessions, add `--max-epochs 5` to `pretrain` or `train` and repeat that
+command until complete. Resume restores optimizer and checkpoint-selection state;
+an interrupted epoch is repeated from the last saved epoch. Finished downstream
+runs are verified and skipped. Complete pretraining before starting fine-tuning.
+
+Outputs are in `results/vit_pretraining_scale_v1/size60/` and `size120/`, including
+pretraining histories/checkpoints and per-fold/seed training histories, selected
+checkpoints and predictions. The final `comparison.json` and paired
+`out_of_fold_predictions.csv` are in `results/vit_pretraining_scale_v1/`.
+The summary requires both sizes and compares the training mean, random ViT and
+pretrained ViTs at 22/60/120 subjects. Negative `scale120_minus22` favors 120.
+
+These remain development experiments with one SSL seed. Updates increase from
+440 to 1,200 to 2,400, so this does not isolate data scale from compute. Existing
+consolidation packages are unchanged. The updated consolidation script includes
+both new ViT arms in the tables, figures and saved-prediction audit.
+The assistant performed static inspection only; tests and training are for user execution.
+
+### Final consolidation including ViT scaling
+
+The report, summary table definition and figure generator now include all nine
+common-design entries: the baseline, random CNN/ViT, and both architectures at
+22/60/120 SSL subjects. The scaling figure shows both architectures and each seed.
+The audit checks ViT reference reuse, scale contrasts and prediction-derived MAEs.
+Previous packages are historical snapshots; generate the final version separately:
+
+```bash
+python -m unittest discover -s tests -p test_consolidate_research.py -v
+python scripts/consolidate_research.py --output results/research_consolidation_v1/package_v3
+```
+
+Run these commands once in the project environment, stopping if either fails.
+The updated tests and generator have not been executed by the assistant. Inspect
+the new figures and `audit.json` before sharing. Remaining deliverables are the
+PhD application summary/presentation and an independent reproducibility review.
