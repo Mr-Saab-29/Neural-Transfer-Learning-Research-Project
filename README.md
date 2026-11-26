@@ -845,3 +845,13 @@ Run these commands once in the project environment, stopping if either fails.
 The updated tests and generator have not been executed by the assistant. Inspect
 the new figures and `audit.json` before sharing. Remaining deliverables are the
 PhD application summary/presentation and an independent reproducibility review.
+
+## Finished research report
+
+The full project report dated 25 November 2026 is available locally in
+`results/research_report_final_v1/research_report.pdf`, with an editable Word copy
+at `results/research_report_final_v1/research_report.docx`. It includes the completed
+CNN and ViT scaling results, four tables, two figures, nine references, evaluation
+boundaries and limitations. All 12 rendered pages were visually inspected. The
+audited `package_v3` and experimental artifacts remain unchanged. These report
+files are under ignored local results; they have not been committed or published.
