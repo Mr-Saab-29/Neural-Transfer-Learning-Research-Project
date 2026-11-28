@@ -4,6 +4,8 @@ Research prototype for data-efficient prediction of AOMIC `IST_fluid` scores fro
 3D brain MRI. IXI and NKI supply the pretraining pilot. AOMIC supplies the labeled
 training, validation, and held-out test subjects.
 
+**[Read the full research report](reports/research_report.pdf)**
+
 ## Study status and consolidated findings
 
 The scoped experimental series is complete (15 November 2026). Under the tested
@@ -843,15 +845,12 @@ python scripts/consolidate_research.py --output results/research_consolidation_v
 
 Run these commands once in the project environment, stopping if either fails.
 The updated tests and generator have not been executed by the assistant. Inspect
-the new figures and `audit.json` before sharing. Remaining deliverables are the
-PhD application summary/presentation and an independent reproducibility review.
+the new figures and `audit.json` before sharing. The full project report is complete. Independent reproduction remains
+future work; application materials are maintained separately.
 
-## Finished research report
+## Research report
 
-The full project report dated 25 November 2026 is available locally in
-`results/research_report_final_v1/research_report.pdf`, with an editable Word copy
-at `results/research_report_final_v1/research_report.docx`. It includes the completed
-CNN and ViT scaling results, four tables, two figures, nine references, evaluation
-boundaries and limitations. All 12 rendered pages were visually inspected. The
-audited `package_v3` and experimental artifacts remain unchanged. These report
-files are under ignored local results; they have not been committed or published.
+[Read the research report (PDF)](reports/research_report.pdf)
+
+The report presents the study design, CNN and ViT experiments, results,
+and limitations of transfer learning for cognitive-score prediction from brain MRI.

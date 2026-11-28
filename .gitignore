@@ -26,6 +26,12 @@ notebooks/
 .pytest_cache/
 *.pyc
 
-# Keep README as the only tracked Markdown document
+# Keep README documents as the only tracked Markdown files
 *.md
 !README.md
+
+# Private manuscript sources
+*.tex
+*.bib
+/reports/*
+!/reports/research_report.pdf
